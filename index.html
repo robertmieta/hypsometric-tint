@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hypsometric Tint Map — Keyless Edition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --ink: #1a1410;
+    --paper: #f4ede0;
+    --paper-2: #e8dcc4;
+    --rule: #3a2a1a;
+    --accent: #a8421f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: "Fraunces", Georgia, serif; background: var(--paper); color: var(--ink); }
+  #map { position: absolute; inset: 0; background: var(--paper-2); }
+
+  /* Override Leaflet's default typography to match the cartographer aesthetic */
+  .leaflet-container { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  .leaflet-control-zoom a {
+    background: var(--paper) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--rule) !important;
+    font-family: "Fraunces", serif !important;
+    font-weight: 600 !important;
+  }
+  .leaflet-control-zoom a:hover { background: var(--paper-2) !important; }
+  .leaflet-control-attribution {
+    background: rgba(244, 237, 224, 0.85) !important;
+    border: 1px solid var(--rule) !important;
+    font-family: "JetBrains Mono", monospace !important;
+    font-size: 9px !important;
+    color: var(--rule) !important;
+  }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+  .leaflet-control-layers {
+    background: var(--paper) !important;
+    border: 1px solid var(--rule) !important;
+    box-shadow: 3px 3px 0 rgba(26,20,16,0.85) !important;
+    border-radius: 0 !important;
+  }
+  .leaflet-control-layers-expanded {
+    padding: 10px 14px !important;
+    font-family: "JetBrains Mono", monospace !important;
+    font-size: 11px !important;
+  }
+  .leaflet-control-layers-separator { border-top: 1px solid var(--rule) !important; }
+
+  /* Cartographer's panel */
+  .panel {
+    position: absolute;
+    top: 18px; left: 18px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 16px 18px 14px;
+    max-width: 340px;
+    width: calc(100vw - 36px);
+    z-index: 500;
+    box-shadow: 3px 3px 0 rgba(26,20,16,0.85);
+    font-feature-settings: "ss01", "ss02";
+  }
+  .panel h1 {
+    font-family: "Fraunces", serif;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    margin-bottom: 2px;
+  }
+  .panel .sub {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--rule);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+  }
+  .panel .badge {
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: var(--paper);
+    padding: 2px 6px;
+    margin-left: 6px;
+    vertical-align: 2px;
+  }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: 8px 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+  }
+  .row label { letter-spacing: 0.05em; text-transform: uppercase; }
+  input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .row .val {
+    min-width: 68px; text-align: right;
+    font-size: 11px; color: var(--rule);
+    font-variant-numeric: tabular-nums;
+  }
+  .toggle {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;
+  }
+  .toggle button {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    padding: 5px 9px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toggle button:hover { background: var(--paper-2); }
+  .toggle button.on { background: var(--ink); color: var(--paper); }
+
+  /* Basemap switcher */
+  .basemap {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--rule);
+  }
+  .basemap .label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--rule);
+    margin-bottom: 6px;
+  }
+
+  /* Legend / scale bar */
+  .legend {
+    position: absolute;
+    bottom: 24px; left: 18px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 10px 12px;
+    z-index: 500;
+    box-shadow: 3px 3px 0 rgba(26,20,16,0.85);
+    min-width: 240px;
+  }
+  .legend .lg-title {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    color: var(--rule);
+  }
+  .legend .ramp {
+    height: 14px; width: 100%; border: 1px solid var(--rule);
+  }
+  .legend .ticks {
+    display: flex; justify-content: space-between;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; margin-top: 4px; color: var(--rule);
+  }
+
+  /* Elevation readout — unique to the keyless version */
+  .readout {
+    position: absolute;
+    top: 18px; right: 18px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 10px 14px;
+    z-index: 500;
+    box-shadow: 3px 3px 0 rgba(26,20,16,0.85);
+    min-width: 180px;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .readout .r-label {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+  .readout .r-elev {
+    font-family: "Fraunces", serif;
+    font-weight: 800;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .readout .r-elev .unit {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--rule);
+    margin-left: 4px;
+  }
+  .readout .r-coord {
+    font-size: 9px;
+    color: var(--rule);
+    margin-top: 4px;
+    letter-spacing: 0.04em;
+  }
+
+  /* Loading indicator */
+  .loader {
+    position: absolute; top: 18px; right: 220px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 6px 10px;
+    z-index: 500;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .loader.on { opacity: 1; }
+  .loader::before {
+    content: "●"; color: var(--accent); margin-right: 6px;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="panel">
+  <h1>Hypsometric Tint <span class="badge">Keyless</span></h1>
+  <div class="sub">Cartographer's Console</div>
+
+  <div class="row">
+    <label>Opacity</label>
+    <input id="opacity" type="range" min="0" max="100" value="72" />
+  </div>
+  <div class="row">
+    <label>Relief</label>
+    <input id="relief" type="range" min="0" max="100" value="55" />
+  </div>
+  <div class="row">
+    <label>Saturation</label>
+    <input id="satur" type="range" min="0" max="200" value="115" />
+  </div>
+  <div class="row">
+    <label>Min</label>
+    <input id="min-t" type="range" min="-1000" max="8000" step="50" value="-500" />
+    <span class="val" id="min-v">-500m</span>
+  </div>
+  <div class="row">
+    <label>Max</label>
+    <input id="max-t" type="range" min="-500" max="9000" step="50" value="7000" />
+    <span class="val" id="max-v">7000m</span>
+  </div>
+
+  <div class="toggle">
+    <button id="t-hyp" class="on">Tint</button>
+    <button id="t-hill" class="on">Hillshade</button>
+    <button id="t-contour">Contours</button>
+  </div>
+
+  <div class="basemap">
+    <div class="label">Basemap (labels &amp; roads)</div>
+    <div class="toggle" id="basemap-switch">
+      <button data-basemap="streets" class="on">Streets</button>
+      <button data-basemap="topo">Topo</button>
+      <button data-basemap="light">Light</button>
+      <button data-basemap="none">None</button>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="lg-title">Elevation — metres above sea</div>
+  <div class="ramp" id="ramp"></div>
+  <div class="ticks">
+    <span>−200</span><span>0</span><span>500</span><span>1500</span><span>3000</span><span>5000+</span>
+  </div>
+</div>
+
+<div class="readout">
+  <div class="r-label">Cursor elevation</div>
+  <div class="r-elev" id="r-elev">—<span class="unit">m</span></div>
+  <div class="r-coord" id="r-coord">move over map</div>
+</div>
+
+<div id="loader" class="loader">Rendering terrain</div>
+
+<script>
+/* Leaflet loader with CDN fallback chain. Some networks block or rate-limit
+   individual CDNs, so we try cdnjs → jsdelivr → unpkg in order. Only after
+   L is confirmed available do we load the main app script. */
+(function loadLeaflet() {
+  const cdns = [
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
+    'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',
+    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  ];
+  let i = 0;
+  function tryNext() {
+    if (i >= cdns.length) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:system-ui">' +
+        '<h2>Could not load Leaflet</h2>' +
+        '<p>All CDN sources failed. Check your network connection or try again later.</p>' +
+        '</div>';
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = cdns[i++];
+    s.onload = () => {
+      if (typeof L !== 'undefined') startApp();
+      else tryNext();
+    };
+    s.onerror = tryNext;
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+
+function startApp() {
+/* =========================================================================
+   HYPSOMETRIC COLOR RAMP (identical tuning to the Google Maps version so
+   the two maps read consistently)
+   ========================================================================= */
+const RAMP_STOPS = [
+  { e: -500, c: [ 40,  70, 110] },
+  { e: -100, c: [ 85, 135, 165] },
+  { e:    0, c: [195, 215, 195] },
+  { e:   80, c: [160, 195, 140] },
+  { e:  250, c: [210, 215, 140] },
+  { e:  500, c: [225, 195, 125] },
+  { e:  900, c: [215, 155, 100] },
+  { e: 1400, c: [195, 110,  75] },
+  { e: 2000, c: [165,  75,  55] },
+  { e: 2800, c: [130,  55,  50] },
+  { e: 3800, c: [150, 110, 100] },
+  { e: 5000, c: [220, 215, 220] },
+  { e: 7000, c: [250, 250, 252] },
+];
+
+function rampColor(e) {
+  if (e <= RAMP_STOPS[0].e) return RAMP_STOPS[0].c;
+  for (let i = 0; i < RAMP_STOPS.length - 1; i++) {
+    const a = RAMP_STOPS[i], b = RAMP_STOPS[i+1];
+    if (e >= a.e && e <= b.e) {
+      const t = (e - a.e) / (b.e - a.e);
+      return [
+        a.c[0] + (b.c[0]-a.c[0]) * t,
+        a.c[1] + (b.c[1]-a.c[1]) * t,
+        a.c[2] + (b.c[2]-a.c[2]) * t,
+      ];
+    }
+  }
+  return RAMP_STOPS[RAMP_STOPS.length-1].c;
+}
+
+// Remap an elevation through user-defined min/max thresholds.
+// Elevations <= minT get the lowest ramp color; >= maxT get the highest.
+// Between them, values are linearly stretched across the full ramp range,
+// which changes the visual "slope" of the gradient without altering its endpoints.
+function remapElevation(e, minT, maxT) {
+  const rampMin = RAMP_STOPS[0].e;
+  const rampMax = RAMP_STOPS[RAMP_STOPS.length - 1].e;
+  if (e <= minT) return rampMin;
+  if (e >= maxT) return rampMax;
+  return rampMin + (rampMax - rampMin) * ((e - minT) / (maxT - minT));
+}
+
+(function paintLegend(){
+  const ramp = document.getElementById('ramp');
+  const stops = [];
+  const eMin = -200, eMax = 5200;
+  for (let i = 0; i <= 20; i++) {
+    const t = i/20, e = eMin + (eMax-eMin)*t;
+    const c = rampColor(e);
+    stops.push(`rgb(${c[0]|0},${c[1]|0},${c[2]|0}) ${(t*100).toFixed(1)}%`);
+  }
+  ramp.style.background = `linear-gradient(to right, ${stops.join(',')})`;
+})();
+
+/* =========================================================================
+   SHARED DEM CACHE — Leaflet creates separate tile instances for zoom/pan,
+   but the underlying elevation data for a given z/x/y is stable, so we
+   cache decoded Float32Arrays. Also used by the cursor elevation readout.
+   ========================================================================= */
+const demCache = new Map();
+const demPending = new Map();
+const DEM_CACHE_MAX = 300;
+
+function fetchDEM(z, x, y) {
+  const n = 1 << z;
+  if (y < 0 || y >= n) return Promise.resolve(null);
+  const xw = ((x % n) + n) % n;
+  const key = `${z}/${xw}/${y}`;
+  if (demCache.has(key)) return Promise.resolve(demCache.get(key));
+  if (demPending.has(key)) return demPending.get(key);
+
+  const url = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${xw}/${y}.png`;
+  const p = new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, 256, 256).data;
+      const elev = new Float32Array(256*256);
+      for (let i = 0; i < elev.length; i++) {
+        const r = data[i*4], g = data[i*4+1], b = data[i*4+2];
+        elev[i] = (r*256 + g + b/256) - 32768;
+      }
+      demCache.set(key, elev);
+      if (demCache.size > DEM_CACHE_MAX) {
+        const first = demCache.keys().next().value;
+        demCache.delete(first);
+      }
+      resolve(elev);
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+  demPending.set(key, p);
+  p.finally(() => demPending.delete(key));
+  return p;
+}
+
+/* =========================================================================
+   LEAFLET HYPSOMETRIC TILE LAYER
+   -------------------------------------------------------------------------
+   Extends L.GridLayer — each tile is a canvas we paint asynchronously
+   from DEM data. When controls change we invalidate by calling redraw()
+   which triggers createTile() again for visible tiles.
+   ========================================================================= */
+const HypsometricLayer = L.GridLayer.extend({
+  options: {
+    tileSize: 256,
+    maxNativeZoom: 15,
+    maxZoom: 19,
+    opacity: 0.72,
+    attribution: 'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">AWS Terrain Tiles</a>',
+  },
+
+  initialize: function(opts) {
+    L.setOptions(this, opts);
+    this._renderOpts = {
+      relief: 55, satur: 115, hyp: true, hill: true, contour: false,
+      minT: -500, maxT: 7000,
+    };
+    this._liveTiles = new Set();
+  },
+
+  setRenderOpt: function(k, v) {
+    this._renderOpts[k] = v;
+    this.redraw();
+  },
+
+  createTile: function(coords, done) {
+    const tile = document.createElement('canvas');
+    tile.width = 256; tile.height = 256;
+    tile.dataset.key = `${coords.z}/${coords.x}/${coords.y}`;
+    this._liveTiles.add(tile);
+
+    this._paint(tile, coords).then(() => done(null, tile))
+                             .catch(err => done(err, tile));
+    return tile;
+  },
+
+  _paint: async function(canvas, coords) {
+    showLoader(true);
+    const { z, x, y } = coords;
+    const [center, east, south] = await Promise.all([
+      fetchDEM(z, x, y),
+      fetchDEM(z, x+1, y),
+      fetchDEM(z, x, y+1),
+    ]);
+    showLoader(false);
+    if (!center) return;
+
+    const ctx = canvas.getContext('2d');
+    const out = ctx.createImageData(256, 256);
+    const o = this._renderOpts;
+    const reliefStrength = o.relief / 100;
+    const satur = o.satur / 100;
+
+    const contourInterval = z >= 13 ? 50 : z >= 11 ? 100 : z >= 9 ? 250 : 500;
+    const mpp = 156543.03 / (1 << z);
+    const vex = 2.0;
+
+    for (let py = 0; py < 256; py++) {
+      for (let px = 0; px < 256; px++) {
+        const idx = py*256 + px;
+        const e = center[idx];
+        const eR = (px < 255) ? center[idx+1] : (east ? east[py*256] : e);
+        const eD = (py < 255) ? center[idx+256] : (south ? south[px] : e);
+
+        const dx = eR - e;
+        const dy = eD - e;
+
+        const nx = -dx * vex, ny = -dy * vex, nz = mpp;
+        const nlen = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+        const dot = (nx*-0.5 + ny*-0.5 + nz*0.7071) / nlen;
+        const shade = 1.0 + (dot * reliefStrength * 0.55);
+
+        let R, G, B;
+        if (o.hyp) {
+          const eRemap = remapElevation(e, o.minT, o.maxT);
+          const c = rampColor(eRemap);
+          R = c[0]; G = c[1]; B = c[2];
+          if (satur !== 1) {
+            const lum = 0.299*R + 0.587*G + 0.114*B;
+            R = lum + (R - lum) * satur;
+            G = lum + (G - lum) * satur;
+            B = lum + (B - lum) * satur;
+          }
+        } else {
+          R = G = B = 200;
+        }
+
+        if (o.hill) { R *= shade; G *= shade; B *= shade; }
+
+        if (o.contour) {
+          const bandC = Math.floor(e / contourInterval);
+          const bandR = Math.floor(eR / contourInterval);
+          const bandD = Math.floor(eD / contourInterval);
+          if (bandC !== bandR || bandC !== bandD) {
+            const major = (bandC % 5 === 0);
+            const darken = major ? 0.45 : 0.65;
+            R *= darken; G *= darken; B *= darken;
+          }
+        }
+
+        const oi = idx * 4;
+        out.data[oi]   = Math.max(0, Math.min(255, R));
+        out.data[oi+1] = Math.max(0, Math.min(255, G));
+        out.data[oi+2] = Math.max(0, Math.min(255, B));
+        out.data[oi+3] = 255;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  },
+});
+
+/* =========================================================================
+   MAP SETUP
+   ------------------------------------------------------------------------- */
+const map = L.map('map', {
+  center: [46.5197, 10.5915], // Central Alps — nice terrain showcase
+  zoom: 9,
+  zoomControl: true,
+  worldCopyJump: true,
+  preferCanvas: true,
+});
+
+// Basemaps — all served from Esri's ArcGIS Online legacy tile services,
+// which don't require an API key for basic use. These are the most reliable
+// keyless options in 2026:
+// - WorldStreetMap: full-color street/road detail with labels
+// - WorldTopoMap: topographic style with terrain-tinted background
+// - WorldLightGray: minimal muted style (best when the hypsometric tint should dominate)
+const ESRI_ATTR = 'Tiles © <a href="https://www.esri.com/">Esri</a> | Data: OSM contributors, USGS, NOAA';
+const basemaps = {
+  streets: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: ESRI_ATTR,
+  }),
+  topo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: ESRI_ATTR,
+  }),
+  light: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 16,
+    attribution: ESRI_ATTR,
+  }),
+};
+
+// Labels-only overlay so roads/towns sit ON TOP of the hypsometric tint.
+// Esri's Reference layer is transparent and shows place names + admin boundaries.
+const labelsOverlay = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: '',
+  pane: 'markerPane', // render above the hypsometric layer
+});
+
+// Start with: Streets (colorful roads/labels) + hypso on top + labels overlay on top of that
+let currentBase = basemaps.streets;
+currentBase.addTo(map);
+
+const hypsoLayer = new HypsometricLayer({ opacity: 0.72 });
+hypsoLayer.addTo(map);
+
+labelsOverlay.addTo(map);
+
+/* =========================================================================
+   GEOLOCATION
+   -------------------------------------------------------------------------
+   Two-stage approach:
+   1. Try browser Geolocation API (precise, but requires permission prompt
+      and can be slow). Cap with a 5s timeout so we don't hang.
+   2. Fall back to IP geolocation via ipapi.co (free, CORS-enabled, no key,
+      city-level accuracy, no permission needed).
+   The map opens at the fallback default IMMEDIATELY so there's no blank
+   wait. When location resolves, we pan to it.
+   ========================================================================= */
+function getBrowserLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('no geolocation api'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precise: true }),
+      err => reject(err),
+      { timeout: 5000, maximumAge: 600000 }
+    );
+  });
+}
+
+async function getIpLocation() {
+  const res = await fetch('https://ipapi.co/json/');
+  if (!res.ok) throw new Error('ipapi failed');
+  const data = await res.json();
+  if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+    throw new Error('no coords in ipapi response');
+  }
+  return { lat: data.latitude, lng: data.longitude, precise: false };
+}
+
+(async function detectAndPan() {
+  let loc;
+  try { loc = await getBrowserLocation(); }
+  catch (e) {
+    try { loc = await getIpLocation(); }
+    catch (e2) { return; } // both failed — stay at default
+  }
+  if (!loc) return;
+  map.setView([loc.lat, loc.lng], loc.precise ? 12 : 10);
+})();
+
+/* =========================================================================
+   CONTROL WIRING
+   ------------------------------------------------------------------------- */
+document.getElementById('opacity').addEventListener('input', e => {
+  hypsoLayer.setOpacity(+e.target.value / 100);
+});
+document.getElementById('relief').addEventListener('change', e => {
+  hypsoLayer.setRenderOpt('relief', +e.target.value);
+});
+document.getElementById('satur').addEventListener('change', e => {
+  hypsoLayer.setRenderOpt('satur', +e.target.value);
+});
+
+function wireToggle(id, key) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('click', () => {
+    const next = !hypsoLayer._renderOpts[key];
+    btn.classList.toggle('on', next);
+    hypsoLayer.setRenderOpt(key, next);
+  });
+}
+wireToggle('t-hyp', 'hyp');
+wireToggle('t-hill', 'hill');
+wireToggle('t-contour', 'contour');
+
+// Gradient range sliders. On 'input' we update the value display and legend
+// ticks live (cheap); on 'change' (slider release) we trigger the tile redraw.
+// Clamping enforces min < max with a 100m minimum gap.
+const minSlider = document.getElementById('min-t');
+const maxSlider = document.getElementById('max-t');
+const minV = document.getElementById('min-v');
+const maxV = document.getElementById('max-v');
+const MIN_GAP = 50;
+
+function updateLegendTicks() {
+  const ticks = document.querySelectorAll('.legend .ticks span');
+  const n = ticks.length - 1;
+  const minT = hypsoLayer._renderOpts.minT;
+  const maxT = hypsoLayer._renderOpts.maxT;
+  for (let i = 0; i < ticks.length; i++) {
+    const v = minT + (maxT - minT) * (i / n);
+    ticks[i].textContent = Math.round(v);
+  }
+}
+updateLegendTicks();
+
+minSlider.addEventListener('input', ev => {
+  let v = +ev.target.value;
+  if (v > hypsoLayer._renderOpts.maxT - MIN_GAP) {
+    v = hypsoLayer._renderOpts.maxT - MIN_GAP;
+    minSlider.value = v;
+  }
+  hypsoLayer._renderOpts.minT = v;
+  minV.textContent = v + 'm';
+  updateLegendTicks();
+});
+minSlider.addEventListener('change', () => hypsoLayer.redraw());
+
+maxSlider.addEventListener('input', ev => {
+  let v = +ev.target.value;
+  if (v < hypsoLayer._renderOpts.minT + MIN_GAP) {
+    v = hypsoLayer._renderOpts.minT + MIN_GAP;
+    maxSlider.value = v;
+  }
+  hypsoLayer._renderOpts.maxT = v;
+  maxV.textContent = v + 'm';
+  updateLegendTicks();
+});
+maxSlider.addEventListener('change', () => hypsoLayer.redraw());
+
+// Basemap switcher
+document.getElementById('basemap-switch').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const which = btn.dataset.basemap;
+  document.querySelectorAll('#basemap-switch button').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+
+  map.removeLayer(currentBase);
+  if (which === 'none') {
+    // transparent background — show only the hypso tint + labels
+    currentBase = null;
+    return;
+  }
+  currentBase = basemaps[which];
+  currentBase.addTo(map);
+  // Keep z-order: base → hypso → labels
+  hypsoLayer.bringToFront();
+  labelsOverlay.bringToFront();
+});
+
+/* =========================================================================
+   CURSOR ELEVATION READOUT — leverages the same cached DEM data
+   Since the hypsometric layer decodes every visible tile, sampling
+   elevation at cursor position is just a cache lookup. No extra fetch.
+   ========================================================================= */
+const elevEl = document.getElementById('r-elev');
+const coordEl = document.getElementById('r-coord');
+
+map.on('mousemove', e => {
+  const z = Math.min(Math.round(map.getZoom()), 15);
+  const n = 1 << z;
+  const latRad = e.latlng.lat * Math.PI / 180;
+  const xf = ((e.latlng.lng + 180) / 360) * n;
+  const yf = (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n;
+  const tx = Math.floor(xf), ty = Math.floor(yf);
+  const px = Math.floor((xf - tx) * 256);
+  const py = Math.floor((yf - ty) * 256);
+
+  const key = `${z}/${((tx % n) + n) % n}/${ty}`;
+  const dem = demCache.get(key);
+  if (dem) {
+    const elev = dem[py*256 + px];
+    elevEl.innerHTML = `${Math.round(elev)}<span class="unit">m</span>`;
+  } else {
+    // not loaded yet — kick a fetch but don't block the readout
+    fetchDEM(z, tx, ty);
+    elevEl.innerHTML = `—<span class="unit">m</span>`;
+  }
+  coordEl.textContent = `${e.latlng.lat.toFixed(4)}°, ${e.latlng.lng.toFixed(4)}°`;
+});
+
+function showLoader(on) {
+  document.getElementById('loader').classList.toggle('on', on);
+}
+
+} // end startApp
+</script>
+</body>
+</html>
